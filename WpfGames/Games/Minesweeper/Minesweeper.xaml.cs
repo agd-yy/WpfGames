@@ -283,8 +283,6 @@ namespace WpfGames.Games.Minesweeper
 
         private void ExitButton_Click(object sender, RoutedEventArgs e)
         {
-            var frame = Parent as Frame;
-          
             mainWindow?.MainFrame?.Navigate(new HomePage(mainWindow.MainFrame));
         }
 
