@@ -1,0 +1,6 @@
+﻿<Window x:Class="WpfGames.MainWindow"
+         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WPF 游戏合集">
+    <Frame x:Name="MainFrame" NavigationUIVisibility="Hidden" Height="auto" Width="auto"/>
+</Window>
