@@ -9,7 +9,7 @@ namespace WpfGames.Games
     public partial class HomePage : Page
     {
         private Frame _mainFrame;
-        MainWindow? mainWindow = Application.Current.MainWindow as MainWindow;
+        MainWindow mainWindow = Application.Current.MainWindow as MainWindow ?? new MainWindow();
         public HomePage(Frame mainFrame)
         {
             InitializeComponent();
@@ -28,6 +28,12 @@ namespace WpfGames.Games
         {
             _mainFrame.Navigate(new Minesweeper.Minesweeper());
         }
+
+        private void Snake_Click(object sender, RoutedEventArgs e)
+        {
+            _mainFrame.Navigate(new Snake.Snake());
+        }
+
     }
 }
 

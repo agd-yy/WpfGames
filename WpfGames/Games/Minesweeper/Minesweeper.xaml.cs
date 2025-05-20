@@ -10,7 +10,7 @@ namespace WpfGames.Games.Minesweeper
     /// </summary>
     public partial class Minesweeper : Page
     {
-        MainWindow? mainWindow = Application.Current.MainWindow as MainWindow;
+        MainWindow mainWindow = Application.Current.MainWindow as MainWindow ?? new MainWindow();
         private const int CellSize = 30;
         private int _mapSize = 10;
         private int _bombCount = 10;
@@ -20,7 +20,7 @@ namespace WpfGames.Games.Minesweeper
         {
             ["初级"] = (6, 5),
             ["中级"] = (10, 10),
-            ["高级"] = (16, 60),
+            ["高级"] = (16, 50),
             ["地狱"] = (20, 120)
         };
         public class Cell
@@ -71,7 +71,7 @@ namespace WpfGames.Games.Minesweeper
             MainCanvas.Height = _mapSize * CellSize;
             GameBorder.Width = MainCanvas.Width + 10;
             GameBorder.Height = MainCanvas.Height + 10;
-            mainWindow.Width = GameBorder.Width + 80;
+            mainWindow.Width = GameBorder.Width + 80 > 280 ? GameBorder.Width + 80 : 280;
             mainWindow.Height = GameBorder.Height + 233;
             // 保证mainWindow在屏幕中间
             mainWindow.Left = (SystemParameters.WorkArea.Width - mainWindow.Width) / 2;
