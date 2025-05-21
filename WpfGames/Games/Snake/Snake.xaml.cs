@@ -302,7 +302,7 @@ namespace WpfGames.Games.Snake
             return _nextDirection;
         }
 
-        // 获取当前方向的候选转向方向（排除180°反向）
+        // 获取当前方向的候选转向方向（排除反向）
         private List<Direction> GetCandidateDirections(Direction currentDir)
         {
             return currentDir switch
