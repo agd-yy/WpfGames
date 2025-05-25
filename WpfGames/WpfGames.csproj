@@ -10,6 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Folder Include="Games\RGB\" />
     <Folder Include="Resources\Converters\" />
     <Folder Include="Resources\Models\" />
   </ItemGroup>

@@ -21,6 +21,7 @@ namespace WpfGames.Games.Snake
         #region 状态
         private readonly LinkedList<Point> _snakeBody = new();
         private readonly HashSet<Point> _bodyPositions = new();
+        private readonly List<Point> _hamiltonianCycle = GenerateHamiltonianCycle();
         private Point _food;
         private enum Direction { Up, Down, Left, Right }
         private Direction _currentDirection = Direction.Right;
@@ -32,7 +33,7 @@ namespace WpfGames.Games.Snake
         private bool _isAutoMode;
         #endregion
 
-        MainWindow mainWindow = Application.Current.MainWindow as MainWindow ?? new MainWindow();
+        MainWindow mainWindow = System.Windows.Application.Current.MainWindow as MainWindow ?? new MainWindow();
         private readonly WriteableBitmap _gameBitmap;
 
         public Snake()
@@ -65,9 +66,9 @@ namespace WpfGames.Games.Snake
             _score = 0;
 
             // 初始蛇身 (3节)
-            AddSegment(new Point(5, 10));
-            AddSegment(new Point(6, 10));
-            AddSegment(new Point(7, 10));
+            AddSegment(new Point(5, 9));
+            AddSegment(new Point(6, 9));
+            AddSegment(new Point(7, 9));
 
             _currentDirection = _nextDirection = Direction.Right;
             GenerateFood();
@@ -77,7 +78,27 @@ namespace WpfGames.Games.Snake
             _lastUpdateTime = DateTime.Now;
             CompositionTarget.Rendering += GameLoop;
         }
-
+        private static List<Point> GenerateHamiltonianCycle()
+        {
+            // 采用蛇形遍历：偶数行从左到右，奇数行从右到左
+            List<Point> cycle = new List<Point>();
+            for (int y = 0; y < GridSize; y++)
+            {
+                if (y % 2 == 0)
+                {
+                    for (int x = 0; x < GridSize; x++)
+                        cycle.Add(new Point(x, y));
+                }
+                else
+                {
+                    for (int x = GridSize - 1; x >= 0; x--)
+                        cycle.Add(new Point(x, y));
+                }
+            }
+            // 为了形成循环（可选）
+            // cycle.Add(cycle[0]);
+            return cycle;
+        }
         private void AddSegment(Point position)
         {
             _snakeBody.AddLast(position);
@@ -91,7 +112,7 @@ namespace WpfGames.Games.Snake
             if (!_isGameRunning || _snakeBody.Last == null) return;
 
             double elapsed = (DateTime.Now - _lastUpdateTime).TotalMilliseconds;
-            if (elapsed < BaseUpdateInterval) return;
+            if (elapsed < 20) return;
 
             _lastUpdateTime = DateTime.Now;
             
@@ -99,22 +120,35 @@ namespace WpfGames.Games.Snake
             // 自动寻路
             if (_isAutoMode)
             {
-                if (_snakeBody.Count > 20)
+                var path = FindSafePathWithTail(_food);
+
+                if (path != null && path.Count > 1)
                 {
-                    if (GetSystematicDirection() is Direction sysDir)
+                    var next = GetDirectionFromPoints(head, path[1]);
+                    if(next != null)
                     {
-                        _nextDirection = sysDir;
+                        _nextDirection = next.Value;
                     }
                     else
                     {
-                        // 如果系统路径规划失败，回退到安全转向
-                        _nextDirection = GetSafeTurnDirection() ;
+                        _nextDirection = GetHamiltonianDirection(head);
                     }
                 }
                 else
                 {
-                    _nextDirection = GetSafeTurnDirection();
+                    // 否则，启用 Hamiltonian 兜底策略
+                    var nextHamiltonian = GetNextHamiltonianStep(head);
+                    var next = GetDirectionFromPoints(head, nextHamiltonian);
+                    if (next != null)
+                    {
+                        _nextDirection = next.Value;
+                    }
+                    else
+                    {
+                        _nextDirection = GetHamiltonianDirection(head);
+                    }
                 }
+
             }
 
             _currentDirection = _nextDirection;
@@ -236,231 +270,24 @@ namespace WpfGames.Games.Snake
         #endregion
 
         #region 自动寻路
-        // 获取食物方向
-        private Direction GetOptimalDirection(Point head, Point food)
+
+        private Direction? GetDirectionFromPoints(Point from, Point to)
         {
-            var dx = food.X - head.X;
-            var dy = food.Y - head.Y;
-
-            // 优先选择距离差较大的轴向
-            if (Math.Abs(dx) > Math.Abs(dy))
+            if (to.X == from.X)
             {
-                return dx > 0 ? Direction.Right : Direction.Left;
+                if (to.Y == from.Y - 1) return Direction.Up;
+                if (to.Y == from.Y + 1) return Direction.Down;
             }
-            else
+            else if (to.Y == from.Y)
             {
-                return dy > 0 ? Direction.Down : Direction.Up;
-            }
-        }
-
-        // 检查direction方向是否安全
-        private bool IsDirectionSafe(Direction direction, Point head)
-        {
-            var testPos = CalculateNewHead(direction, head);
-            return !IsCollision(testPos);
-        }
-
-        //获取安全转向方向（优先指向食物，其次选择其他安全方向）
-        private Direction GetSafeTurnDirection()
-        {
-            if (_snakeBody.Last == null)
-            {
-                return _nextDirection;
-            }
-            var head = _snakeBody.Last.Value;
-            var currentDir = _currentDirection;
-
-            // 1. 优先尝试直接转向食物方向
-            if (GetOptimalDirection(head, _food) is Direction targetDir &&
-                targetDir != currentDir &&
-                IsDirectionSafe(targetDir, head))
-            {
-                return targetDir;
+                if (to.X == from.X - 1) return Direction.Left;
+                if (to.X == from.X + 1) return Direction.Right;
             }
 
-            // 2. 次优先选择与食物方向夹角≤90度的安全方向
-            var candidateDirections = GetCandidateDirections(currentDir);
-            foreach (var dir in candidateDirections.OrderBy(d =>
-                GetDirectionPriority(d, head, _food)))
-            {
-                if (IsDirectionSafe(dir, head))
-                {
-                    return dir;
-                }
-            }
-
-            // 3. 最后尝试任何安全方向（保底逻辑）
-            foreach (var dir in Enum.GetValues(typeof(Direction)).Cast<Direction>())
-            {
-                if (dir != currentDir && IsDirectionSafe(dir, head))
-                {
-                    return dir;
-                }
-            }
-
-            // GG
-            return _nextDirection;
-        }
-
-        // 获取当前方向的候选转向方向（排除反向）
-        private List<Direction> GetCandidateDirections(Direction currentDir)
-        {
-            return currentDir switch
-            {
-                Direction.Up => new List<Direction> { Direction.Right, Direction.Left, Direction.Down },
-                Direction.Down => new List<Direction> { Direction.Left, Direction.Right, Direction.Up },
-                Direction.Left => new List<Direction> { Direction.Up, Direction.Down, Direction.Right },
-                Direction.Right => new List<Direction> { Direction.Down, Direction.Up, Direction.Left },
-                _ => Enum.GetValues(typeof(Direction)).Cast<Direction>().ToList()
-            };
-        }
-
-        /// 方向优先级计算（数值越小优先级越高）
-        private int GetDirectionPriority(Direction dir, Point head, Point food)
-        {
-            // 计算与食物方向的吻合度
-            var dx = food.X - head.X;
-            var dy = food.Y - head.Y;
-
-            int priority = 0;
-
-            // 完全匹配方向
-            if ((dir == Direction.Right && dx > 0) ||
-                (dir == Direction.Left && dx < 0) ||
-                (dir == Direction.Down && dy > 0) ||
-                (dir == Direction.Up && dy < 0))
-            {
-                priority -= 100; // 最高优先级
-            }
-
-            // 次优方向（至少轴向正确）
-            if ((dir == Direction.Right || dir == Direction.Left) && Math.Abs(dx) > Math.Abs(dy))
-            {
-                priority -= 50;
-            }
-            else if ((dir == Direction.Up || dir == Direction.Down) && Math.Abs(dy) > Math.Abs(dx))
-            {
-                priority -= 50;
-            }
-
-            // 添加随机因素避免固定模式
-            priority += new Random().Next(10);
-            return priority;
-        }
-
-
-        /// <summary>
-        /// 地毯式搜索路径规划
-        /// </summary>
-        private Direction? GetSystematicDirection()
-        {
-            if(_snakeBody.Last == null || _snakeBody.First == null)
-            {
-                return _nextDirection;
-            }
-            var head = _snakeBody.Last.Value;
-            var tail = _snakeBody.First.Value;
-
-            // 1. 计算未被占据的空间
-            var emptyCells = GetEmptyCells().ToList();
-
-            // 2. 使用BFS找到最近的未探索区域
-            var target = FindNearestUnexplored(head, emptyCells);
-            if (!target.HasValue) return null;
-
-            // 3. 使用A*算法计算安全路径
-            var path = FindPath(head, target.Value, emptyCells);
-            if (path == null || path.Count == 0) return null;
-
-            // 4. 转换为移动方向
-            return GetDirectionFromPath(head, path[0]);
-        }
-
-        /// <summary>
-        /// 获取所有空单元格（包括蛇尾）
-        /// </summary>
-        private IEnumerable<Point> GetEmptyCells()
-        {
-            for (int x = 0; x < GridSize; x++)
-            {
-                for (int y = 0; y < GridSize; y++)
-                {
-                    var point = new Point(x, y);
-                    if (!_bodyPositions.Contains(point) || point == _snakeBody.First?.Value)
-                        yield return point;
-                }
-            }
-        }
-
-        /// <summary>
-        /// 寻找最近的未探索区域（BFS实现）
-        /// </summary>
-        private Point? FindNearestUnexplored(Point start, List<Point> emptyCells)
-        {
-            var visited = new HashSet<Point> { start };
-            var queue = new Queue<Point>();
-            queue.Enqueue(start);
-
-            while (queue.Count > 0)
-            {
-                var current = queue.Dequeue();
-
-                // 如果当前点是蛇尾或未被蛇身覆盖
-                if (current == _snakeBody.First?.Value || !_bodyPositions.Contains(current))
-                    return current;
-
-                foreach (var neighbor in GetNeighbors(current))
-                {
-                    if (emptyCells.Contains(neighbor) && !visited.Contains(neighbor))
-                    {
-                        visited.Add(neighbor);
-                        queue.Enqueue(neighbor);
-                    }
-                }
-            }
             return null;
         }
 
-        /// <summary>
-        /// A*路径查找算法
-        /// </summary>
-        private List<Point>? FindPath(Point start, Point end, List<Point> walkableCells)
-        {
-            var openSet = new PriorityQueue<Point, float>();
-            openSet.Enqueue(start, 0);
-
-            var cameFrom = new Dictionary<Point, Point>();
-            var gScore = new Dictionary<Point, float> { [start] = 0 };
-            var fScore = new Dictionary<Point, float> { [start] = Heuristic(start, end) };
-
-            while (openSet.Count > 0)
-            {
-                var current = openSet.Dequeue();
-                if (current == end)
-                    return ReconstructPath(cameFrom, current);
-
-                foreach (var neighbor in GetNeighbors(current))
-                {
-                    if (!walkableCells.Contains(neighbor)) continue;
-
-                    float tentativeGScore = gScore[current] + 1;
-                    if (!gScore.ContainsKey(neighbor) || tentativeGScore < gScore[neighbor])
-                    {
-                        cameFrom[neighbor] = current;
-                        gScore[neighbor] = tentativeGScore;
-                        fScore[neighbor] = tentativeGScore + Heuristic(neighbor, end);
-                        openSet.Enqueue(neighbor, fScore[neighbor]);
-                    }
-                }
-            }
-            return null;
-        }
-
-        // 辅助方法
-        private float Heuristic(Point a, Point b)
-            => Convert.ToInt32(Math.Abs(a.X - b.X) + Math.Abs(a.Y - b.Y));
-
-        private List<Point>? ReconstructPath(Dictionary<Point, Point> cameFrom, Point current)
+        private List<Point> ReconstructPath(Dictionary<Point, Point> cameFrom, Point current)
         {
             var path = new List<Point> { current };
             while (cameFrom.ContainsKey(current))
@@ -469,25 +296,183 @@ namespace WpfGames.Games.Snake
                 path.Add(current);
             }
             path.Reverse();
-            return path.Count > 1 ? path : null;
+            return path;
         }
 
+        private Direction GetHamiltonianDirection(Point current)
+        {
+            // 以“蛇形遍历”规则（横向扫行）为例
+            if (current.Y % 2 == 0) // 偶数行，从左往右
+            {
+                if (current.X < GridSize - 1)
+                    return Direction.Right;
+                else
+                    return Direction.Down;
+            }
+            else // 奇数行，从右往左
+            {
+                if (current.X > 0)
+                    return Direction.Left;
+                else
+                    return Direction.Down;
+            }
+        }
         private IEnumerable<Point> GetNeighbors(Point p)
         {
-            if (p.X > 0) yield return new Point(p.X - 1, p.Y);
-            if (p.X < GridSize - 1) yield return new Point(p.X + 1, p.Y);
-            if (p.Y > 0) yield return new Point(p.X, p.Y - 1);
-            if (p.Y < GridSize - 1) yield return new Point(p.X, p.Y + 1);
+            int[] dx = { -1, 1, 0, 0 };
+            int[] dy = { 0, 0, -1, 1 };
+            for (int i = 0; i < 4; i++)
+            {
+                var neighbor = new Point(p.X + dx[i], p.Y + dy[i]);
+                if (IsInsideMap(neighbor))
+                {
+                    yield return neighbor;
+                }
+            }
         }
 
-        private Direction? GetDirectionFromPath(Point from, Point to)
+        private bool IsInsideMap(Point p)
         {
-            if (to.X > from.X) return Direction.Right;
-            if (to.X < from.X) return Direction.Left;
-            if (to.Y > from.Y) return Direction.Down;
-            if (to.Y < from.Y) return Direction.Up;
+            return p.X >= 0 && p.X < GridSize && p.Y >= 0 && p.Y < GridSize;
+        }
+
+        private double Heuristic(Point a, Point b)
+        {
+            var dx = Math.Abs(a.X - b.X);
+            var dy = Math.Abs(a.Y - b.Y);
+            return dx + dy;
+        }
+
+        private List<Point> FindPathWithTail(Point start, Point target, LinkedList<Point> snake)
+        {
+            var openSet = new PriorityQueue<Point, double>();
+            var cameFrom = new Dictionary<Point, Point>();
+            var gScore = new Dictionary<Point, double>();
+            var fScore = new Dictionary<Point, double>();
+
+            Point tail = snake.First.Value;
+            HashSet<Point> occupied = new(_bodyPositions);
+            occupied.Remove(tail); // "追尾策略"：将尾巴视为可通行
+
+            openSet.Enqueue(start, 0);
+            gScore[start] = 0;
+            fScore[start] = Heuristic(start, target);
+
+            while (openSet.Count > 0)
+            {
+                Point current = openSet.Dequeue();
+
+                if (current == target)
+                {
+                    return ReconstructPath(cameFrom, current);
+                }
+
+                foreach (var neighbor in GetNeighbors(current))
+                {
+                    if (!IsInsideMap(neighbor) || occupied.Contains(neighbor))
+                        continue;
+
+                    var tentativeG = gScore[current] + 1;
+                    if (!gScore.ContainsKey(neighbor) || tentativeG < gScore[neighbor])
+                    {
+                        cameFrom[neighbor] = current;
+                        gScore[neighbor] = tentativeG;
+                        fScore[neighbor] = tentativeG + Heuristic(neighbor, target);
+                        if (!openSet.UnorderedItems.Any(p => p.Element == neighbor))
+                        {
+                            openSet.Enqueue(neighbor, fScore[neighbor]);
+                        }
+                    }
+                }
+            }
+
+            return null; // 未找到路径
+        }
+        private List<Point> FindSafePathWithTail(Point food)
+        {
+            // 注意：追尾策略：允许将蛇尾视为可走，即在 occupied 中去掉蛇尾
+            HashSet<Point> occupiedForSearch = new HashSet<Point>(_bodyPositions);
+            if (_snakeBody.Count > 0)
+                occupiedForSearch.Remove(_snakeBody.First.Value);
+
+            // 计算从蛇头到食物的路径
+            var path = FindPath(_snakeBody.Last.Value, food, occupiedForSearch);
+            if (path == null)
+                return null;
+
+            // 模拟蛇体移动
+            var virtualSnake = new LinkedList<Point>(new List<Point>(_snakeBody));
+            var virtualOccupied = new HashSet<Point>(_bodyPositions);
+            foreach (var step in path.Skip(1)) // 跳过当前蛇头
+            {
+                virtualSnake.AddLast(step);
+                virtualOccupied.Add(step);
+                if (step != food)
+                {
+                    // 如果没吃食物，则移除尾部
+                    virtualOccupied.Remove(virtualSnake.First.Value);
+                    virtualSnake.RemoveFirst();
+                }
+            }
+
+            Point newHead = virtualSnake.Last.Value;
+            Point newTail = virtualSnake.First.Value;
+            // 新状态下，不允许穿越蛇身（此时蛇尾已固定，因为下一步不会移除它）
+            var occupiedForTailCheck = new HashSet<Point>(virtualOccupied);
+            occupiedForTailCheck.Remove(newTail);
+
+            // 检查是否存在路径从新蛇头到新蛇尾（安全检测）
+            var pathToTail = FindPath(newHead, newTail, occupiedForTailCheck);
+            return pathToTail != null ? path : null;
+        }
+
+        private List<Point> FindPath(Point start, Point target, HashSet<Point> occupied)
+        {
+            var openSet = new PriorityQueue<Point, double>();
+            var cameFrom = new Dictionary<Point, Point>();
+            var gScore = new Dictionary<Point, double> { [start] = 0 };
+            var fScore = new Dictionary<Point, double> { [start] = Heuristic(start, target) };
+
+            openSet.Enqueue(start, fScore[start]);
+
+            while (openSet.Count > 0)
+            {
+                Point current = openSet.Dequeue();
+                if (current == target)
+                    return ReconstructPath(cameFrom, current);
+
+                foreach (Point neighbor in GetNeighbors(current))
+                {
+                    if (occupied.Contains(neighbor)) continue; // 障碍
+
+                    var tentativeG = gScore[current] + 1;
+                    if (!gScore.ContainsKey(neighbor) || tentativeG < gScore[neighbor])
+                    {
+                        cameFrom[neighbor] = current;
+                        gScore[neighbor] = tentativeG;
+                        fScore[neighbor] = tentativeG + Heuristic(neighbor, target);
+                        if (!openSet.UnorderedItems.Any(x => x.Element == neighbor))
+                            openSet.Enqueue(neighbor, fScore[neighbor]);
+                    }
+                }
+            }
+
             return null;
         }
+        private Point GetNextHamiltonianStep(Point head)
+        {
+            // 在预先生成的哈密顿回路中查找蛇头的位置
+            int index = _hamiltonianCycle.FindIndex(p => p.Equals(head));
+            if (index < 0)
+            {
+                // 如果未找到，返回头部不动（异常处理，可根据情况改进）
+                return head;
+            }
+            // 下一个点，即在循环中下一个
+            int nextIndex = (index + 1) % _hamiltonianCycle.Count;
+            return _hamiltonianCycle[nextIndex];
+        }
+
         #endregion
 
         #region 渲染
