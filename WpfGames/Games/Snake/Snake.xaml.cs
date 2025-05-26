@@ -21,7 +21,6 @@ namespace WpfGames.Games.Snake
         #region 状态
         private readonly LinkedList<Point> _snakeBody = new();
         private readonly HashSet<Point> _bodyPositions = new();
-        private readonly List<Point> _hamiltonianCycle = GenerateHamiltonianCycle();
         private Point _food;
         private enum Direction { Up, Down, Left, Right }
         private Direction _currentDirection = Direction.Right;
@@ -33,7 +32,7 @@ namespace WpfGames.Games.Snake
         private bool _isAutoMode;
         #endregion
 
-        MainWindow mainWindow = System.Windows.Application.Current.MainWindow as MainWindow ?? new MainWindow();
+        MainWindow mainWindow = Application.Current.MainWindow as MainWindow ?? new MainWindow();
         private readonly WriteableBitmap _gameBitmap;
 
         public Snake()
@@ -78,27 +77,7 @@ namespace WpfGames.Games.Snake
             _lastUpdateTime = DateTime.Now;
             CompositionTarget.Rendering += GameLoop;
         }
-        private static List<Point> GenerateHamiltonianCycle()
-        {
-            // 采用蛇形遍历：偶数行从左到右，奇数行从右到左
-            List<Point> cycle = new List<Point>();
-            for (int y = 0; y < GridSize; y++)
-            {
-                if (y % 2 == 0)
-                {
-                    for (int x = 0; x < GridSize; x++)
-                        cycle.Add(new Point(x, y));
-                }
-                else
-                {
-                    for (int x = GridSize - 1; x >= 0; x--)
-                        cycle.Add(new Point(x, y));
-                }
-            }
-            // 为了形成循环（可选）
-            // cycle.Add(cycle[0]);
-            return cycle;
-        }
+        
         private void AddSegment(Point position)
         {
             _snakeBody.AddLast(position);
@@ -116,7 +95,7 @@ namespace WpfGames.Games.Snake
 
             _lastUpdateTime = DateTime.Now;
             
-            var head = _snakeBody.Last.Value;
+            var head = _snakeBody.Last();
             // 自动寻路
             if (_isAutoMode)
             {
@@ -124,29 +103,11 @@ namespace WpfGames.Games.Snake
 
                 if (path != null && path.Count > 1)
                 {
-                    var next = GetDirectionFromPoints(head, path[1]);
-                    if(next != null)
-                    {
-                        _nextDirection = next.Value;
-                    }
-                    else
-                    {
-                        _nextDirection = GetHamiltonianDirection(head);
-                    }
+                    _nextDirection = GetDirectionFromPoints(head, path[1]);
                 }
                 else
                 {
-                    // 否则，启用 Hamiltonian 兜底策略
-                    var nextHamiltonian = GetNextHamiltonianStep(head);
-                    var next = GetDirectionFromPoints(head, nextHamiltonian);
-                    if (next != null)
-                    {
-                        _nextDirection = next.Value;
-                    }
-                    else
-                    {
-                        _nextDirection = GetHamiltonianDirection(head);
-                    }
+                    _nextDirection = GetHamiltonianDirection(head);
                 }
 
             }
@@ -203,9 +164,7 @@ namespace WpfGames.Games.Snake
 
         private void RemoveTail()
         {
-            if (_snakeBody.First == null)
-                return;
-            var tail = _snakeBody.First.Value;
+            var tail = _snakeBody.First();
             _snakeBody.RemoveFirst();
             _bodyPositions.Remove(tail);
         }
@@ -271,7 +230,7 @@ namespace WpfGames.Games.Snake
 
         #region 自动寻路
 
-        private Direction? GetDirectionFromPoints(Point from, Point to)
+        private Direction GetDirectionFromPoints(Point from, Point to)
         {
             if (to.X == from.X)
             {
@@ -284,21 +243,11 @@ namespace WpfGames.Games.Snake
                 if (to.X == from.X + 1) return Direction.Right;
             }
 
-            return null;
+            return _nextDirection;
         }
+        
 
-        private List<Point> ReconstructPath(Dictionary<Point, Point> cameFrom, Point current)
-        {
-            var path = new List<Point> { current };
-            while (cameFrom.ContainsKey(current))
-            {
-                current = cameFrom[current];
-                path.Add(current);
-            }
-            path.Reverse();
-            return path;
-        }
-
+        // TODO
         private Direction GetHamiltonianDirection(Point current)
         {
             // 以“蛇形遍历”规则（横向扫行）为例
@@ -317,6 +266,7 @@ namespace WpfGames.Games.Snake
                     return Direction.Down;
             }
         }
+
         private IEnumerable<Point> GetNeighbors(Point p)
         {
             int[] dx = { -1, 1, 0, 0 };
@@ -343,65 +293,15 @@ namespace WpfGames.Games.Snake
             return dx + dy;
         }
 
-        private List<Point> FindPathWithTail(Point start, Point target, LinkedList<Point> snake)
+        private List<Point>? FindSafePathWithTail(Point food)
         {
-            var openSet = new PriorityQueue<Point, double>();
-            var cameFrom = new Dictionary<Point, Point>();
-            var gScore = new Dictionary<Point, double>();
-            var fScore = new Dictionary<Point, double>();
-
-            Point tail = snake.First.Value;
-            HashSet<Point> occupied = new(_bodyPositions);
-            occupied.Remove(tail); // "追尾策略"：将尾巴视为可通行
-
-            openSet.Enqueue(start, 0);
-            gScore[start] = 0;
-            fScore[start] = Heuristic(start, target);
-
-            while (openSet.Count > 0)
-            {
-                Point current = openSet.Dequeue();
-
-                if (current == target)
-                {
-                    return ReconstructPath(cameFrom, current);
-                }
-
-                foreach (var neighbor in GetNeighbors(current))
-                {
-                    if (!IsInsideMap(neighbor) || occupied.Contains(neighbor))
-                        continue;
-
-                    var tentativeG = gScore[current] + 1;
-                    if (!gScore.ContainsKey(neighbor) || tentativeG < gScore[neighbor])
-                    {
-                        cameFrom[neighbor] = current;
-                        gScore[neighbor] = tentativeG;
-                        fScore[neighbor] = tentativeG + Heuristic(neighbor, target);
-                        if (!openSet.UnorderedItems.Any(p => p.Element == neighbor))
-                        {
-                            openSet.Enqueue(neighbor, fScore[neighbor]);
-                        }
-                    }
-                }
-            }
-
-            return null; // 未找到路径
-        }
-        private List<Point> FindSafePathWithTail(Point food)
-        {
-            // 注意：追尾策略：允许将蛇尾视为可走，即在 occupied 中去掉蛇尾
-            HashSet<Point> occupiedForSearch = new HashSet<Point>(_bodyPositions);
-            if (_snakeBody.Count > 0)
-                occupiedForSearch.Remove(_snakeBody.First.Value);
-
             // 计算从蛇头到食物的路径
-            var path = FindPath(_snakeBody.Last.Value, food, occupiedForSearch);
+            var path = FindPath(_snakeBody.Last(), food, new HashSet<Point>(_bodyPositions));
             if (path == null)
                 return null;
 
             // 模拟蛇体移动
-            var virtualSnake = new LinkedList<Point>(new List<Point>(_snakeBody));
+            var virtualSnake = new LinkedList<Point>(_snakeBody);
             var virtualOccupied = new HashSet<Point>(_bodyPositions);
             foreach (var step in path.Skip(1)) // 跳过当前蛇头
             {
@@ -409,24 +309,57 @@ namespace WpfGames.Games.Snake
                 virtualOccupied.Add(step);
                 if (step != food)
                 {
-                    // 如果没吃食物，则移除尾部
-                    virtualOccupied.Remove(virtualSnake.First.Value);
+                    Point tail = virtualSnake.First();
                     virtualSnake.RemoveFirst();
+                    virtualOccupied.Remove(tail);
                 }
             }
 
-            Point newHead = virtualSnake.Last.Value;
-            Point newTail = virtualSnake.First.Value;
+            Point newHead = virtualSnake.Last();
+            Point newTail = virtualSnake.First();
             // 新状态下，不允许穿越蛇身（此时蛇尾已固定，因为下一步不会移除它）
             var occupiedForTailCheck = new HashSet<Point>(virtualOccupied);
             occupiedForTailCheck.Remove(newTail);
 
             // 检查是否存在路径从新蛇头到新蛇尾（安全检测）
             var pathToTail = FindPath(newHead, newTail, occupiedForTailCheck);
-            return pathToTail != null ? path : null;
+            if (pathToTail == null)
+            {
+                var farPoint = FindLongestSafePath(_snakeBody.Last(), food);// Todo 
+                return farPoint;
+            }
+            return path;
         }
 
-        private List<Point> FindPath(Point start, Point target, HashSet<Point> occupied)
+        private List<Point>? FindLongestSafePath(Point head, Point food)
+        {
+            List<Point>? bestPath = null;
+            double maxDistance = -1;
+
+            for (int x = 0; x < GridSize; x++)
+            {
+                for (int y = 0; y < GridSize; y++)
+                {
+                    Point target = new Point(x, y);
+                    if (!_bodyPositions.Contains(target))
+                    {
+                        var path = FindPath(head, target, _bodyPositions);
+                        if (path != null)
+                        {
+                            var dist = Math.Abs(target.X - food.X) + Math.Abs(target.Y - food.Y);
+                            if (dist > maxDistance)
+                            {
+                                maxDistance = dist;
+                                bestPath = path;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return bestPath;
+        }
+        private List<Point>? FindPath(Point start, Point target, HashSet<Point> occupied)
         {
             var openSet = new PriorityQueue<Point, double>();
             var cameFrom = new Dictionary<Point, Point>();
@@ -439,7 +372,16 @@ namespace WpfGames.Games.Snake
             {
                 Point current = openSet.Dequeue();
                 if (current == target)
-                    return ReconstructPath(cameFrom, current);
+                {
+                    var path = new List<Point> { current };
+                    while (cameFrom.ContainsKey(current))
+                    {
+                        current = cameFrom[current];
+                        path.Add(current);
+                    }
+                    path.Reverse();
+                    return path;
+                }
 
                 foreach (Point neighbor in GetNeighbors(current))
                 {
@@ -459,20 +401,6 @@ namespace WpfGames.Games.Snake
 
             return null;
         }
-        private Point GetNextHamiltonianStep(Point head)
-        {
-            // 在预先生成的哈密顿回路中查找蛇头的位置
-            int index = _hamiltonianCycle.FindIndex(p => p.Equals(head));
-            if (index < 0)
-            {
-                // 如果未找到，返回头部不动（异常处理，可根据情况改进）
-                return head;
-            }
-            // 下一个点，即在循环中下一个
-            int nextIndex = (index + 1) % _hamiltonianCycle.Count;
-            return _hamiltonianCycle[nextIndex];
-        }
-
         #endregion
 
         #region 渲染
